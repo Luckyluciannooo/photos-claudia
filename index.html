@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Photos de la fête</title>
+<style>
+  :root { --or:#e8c477; --fond:#14101c; --carte:#221b30; --texte:#f6f1e7; --doux:#b9afc9; --ok:#7ddc9a; --err:#ff8f8f; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100dvh; background:radial-gradient(circle at 50% -10%, #3a2a55 0%, var(--fond) 60%); color:var(--texte);
+         font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding:24px 18px 40px; }
+  main { max-width:480px; margin:0 auto; text-align:center; }
+  .confetti { font-size:44px; }
+  h1 { font-family:Georgia, "Times New Roman", serif; color:var(--or); font-size:32px; margin:6px 0 8px; line-height:1.15; }
+  p.intro { color:var(--doux); font-size:17px; margin:0 0 22px; line-height:1.4; }
+  label { display:block; text-align:left; font-size:14px; color:var(--doux); margin-bottom:6px; }
+  input[type=text] { width:100%; padding:14px; font-size:17px; border-radius:12px; border:1px solid #453a5c; background:var(--carte); color:var(--texte); margin-bottom:18px; }
+  .btn { display:block; width:100%; padding:20px; font-size:20px; font-weight:700; border-radius:16px; border:0; cursor:pointer; margin-bottom:12px; }
+  .btn.principal { background:var(--or); color:#2a1f0a; }
+  .btn.second { background:transparent; color:var(--or); border:2px solid var(--or); }
+  input[type=file] { display:none; }
+  #etat { margin:18px 0 6px; font-size:17px; min-height:24px; }
+  #etat.ok { color:var(--ok); } #etat.err { color:var(--err); }
+  .barre { height:8px; background:#3a3050; border-radius:8px; overflow:hidden; visibility:hidden; }
+  .barre.visible { visibility:visible; }
+  .barre > div { height:100%; width:0; background:var(--or); transition:width .2s; }
+  #vignettes { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:20px; }
+  #vignettes div { position:relative; aspect-ratio:1; border-radius:10px; overflow:hidden; background:var(--carte); }
+  #vignettes img { width:100%; height:100%; object-fit:cover; display:block; }
+  #vignettes span { position:absolute; right:5px; bottom:4px; font-size:16px; text-shadow:0 0 4px #000; }
+  #vignettes .attente img { opacity:.4; }
+  footer { margin-top:28px; color:var(--doux); font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="confetti">🎉</div>
+  <h1 id="titre">La fête</h1>
+  <p class="intro">Partagez vos photos de la soirée : elles iront directement dans l'album souvenir.</p>
+
+  <label for="nom">Votre prénom (facultatif)</label>
+  <input type="text" id="nom" maxlength="30" autocomplete="given-name" placeholder="Ex. : Marie">
+
+  <button class="btn principal" id="btnCamera">📸 Prendre une photo</button>
+  <button class="btn second" id="btnGalerie">🖼️ Choisir des photos</button>
+  <input type="file" id="camera" accept="image/*" capture="environment">
+  <input type="file" id="galerie" accept="image/*" multiple>
+
+  <div id="etat"></div>
+  <div class="barre" id="barre"><div></div></div>
+  <div id="vignettes"></div>
+  <footer>Vous pouvez en envoyer autant que vous voulez, toute la soirée. Merci ! 💛</footer>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>
+const C = window.CONFIG;
+document.getElementById('titre').textContent = C.TITRE;
+document.title = 'Photos – ' + C.TITRE;
+
+const $ = id => document.getElementById(id);
+const etat = $('etat'), barre = $('barre'), vignettes = $('vignettes'), nom = $('nom');
+let client = null;
+try { client = supabase.createClient(C.SUPABASE_URL, C.SUPABASE_KEY); } catch (e) {}
+
+try { nom.value = localStorage.getItem('prenom') || ''; } catch (e) {}
+nom.addEventListener('change', () => { try { localStorage.setItem('prenom', nom.value.trim()); } catch (e) {} });
+
+$('btnCamera').onclick = () => $('camera').click();
+$('btnGalerie').onclick = () => $('galerie').click();
+$('camera').onchange = e => ajouter(e.target);
+$('galerie').onchange = e => ajouter(e.target);
+
+const file = []; let enCours = false, total = 0, faits = 0, echecs = 0;
+
+function ajouter(input) {
+  for (const f of input.files) {
+    const el = document.createElement('div'); el.className = 'attente';
+    const img = document.createElement('img'); img.src = URL.createObjectURL(f);
+    const badge = document.createElement('span'); badge.textContent = '⏳';
+    el.append(img, badge); vignettes.prepend(el);
+    file.push({ f, el, badge }); total++;
+  }
+  input.value = '';
+  traiter();
+}
+
+function nomPropre() {
+  return (nom.value || 'invite').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || 'invite';
+}
+
+async function preparer(f) {
+  // Redimensionne et convertit en JPEG (règle aussi l'orientation et le HEIC quand le téléphone le permet)
+  try {
+    let source, w, h;
+    if ('createImageBitmap' in window) {
+      try { source = await createImageBitmap(f, { imageOrientation: 'from-image' }); w = source.width; h = source.height; } catch (e) {}
+    }
+    if (!source) {
+      source = await new Promise((ok, non) => { const i = new Image(); i.onload = () => ok(i); i.onerror = non; i.src = URL.createObjectURL(f); });
+      w = source.naturalWidth; h = source.naturalHeight;
+    }
+    const r = Math.min(1, C.MAX_PIXELS / Math.max(w, h));
+    const cv = document.createElement('canvas'); cv.width = Math.round(w * r); cv.height = Math.round(h * r);
+    cv.getContext('2d').drawImage(source, 0, 0, cv.width, cv.height);
+    const blob = await new Promise(ok => cv.toBlob(ok, 'image/jpeg', C.QUALITE_JPEG));
+    if (blob && blob.size > 0) return { blob, ext: 'jpg', type: 'image/jpeg' };
+  } catch (e) {}
+  const ext = (f.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+  return { blob: f, ext, type: f.type || 'image/jpeg' };
+}
+
+async function envoyer(item) {
+  const { blob, ext, type } = await preparer(item.f);
+  const chemin = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${nomPropre()}.${ext}`;
+  let derniere;
+  for (let essai = 0; essai < 3; essai++) {
+    const { error } = await client.storage.from(C.BUCKET).upload(chemin, blob, { contentType: type, cacheControl: '31536000', upsert: false });
+    if (!error) return;
+    derniere = error;
+    await new Promise(r => setTimeout(r, 1500 * (essai + 1)));
+  }
+  throw derniere;
+}
+
+async function traiter() {
+  if (enCours) return;
+  if (!client) { afficher('Configuration manquante. Avisez Luc !', 'err'); return; }
+  enCours = true; barre.classList.add('visible');
+  while (file.length) {
+    const item = file.shift();
+    afficher(`Envoi de la photo ${faits + echecs + 1} sur ${total}…`);
+    try { await envoyer(item); faits++; item.el.className = ''; item.badge.textContent = '✅'; }
+    catch (e) { echecs++; item.badge.textContent = '⚠️'; console.error(e); }
+    barre.firstElementChild.style.width = Math.round((faits + echecs) / total * 100) + '%';
+  }
+  enCours = false;
+  if (echecs) afficher(`${faits} photo(s) envoyée(s), ${echecs} en échec. Vérifiez votre connexion et réessayez.`, 'err');
+  else afficher(`Merci ! ${faits} photo${faits > 1 ? 's' : ''} envoyée${faits > 1 ? 's' : ''} 🎉`, 'ok');
+}
+
+function afficher(t, cls) { etat.textContent = t; etat.className = cls || ''; }
+window.addEventListener('beforeunload', e => { if (enCours) { e.preventDefault(); e.returnValue = ''; } });
+</script>
+</body>
+</html>

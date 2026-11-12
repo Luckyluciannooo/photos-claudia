@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Mur de photos</title>
+<style>
+  html, body { margin:0; height:100%; background:#000; overflow:hidden; cursor:none; font-family:Georgia, serif; }
+  img.diapo { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; opacity:0; transition:opacity 1.2s; }
+  img.diapo.visible { opacity:1; }
+  #bandeau { position:absolute; left:0; right:0; bottom:0; padding:18px 28px; display:flex; justify-content:space-between; align-items:flex-end;
+             color:#e8c477; background:linear-gradient(transparent, rgba(0,0,0,.75)); font-size:2.2vw; text-shadow:0 2px 6px #000; }
+  #compteur { font-size:1.4vw; color:#ddd; font-family:sans-serif; }
+  #vide { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#e8c477; text-align:center; }
+  #vide h1 { font-size:5vw; margin:0 0 1vw; } #vide p { font-size:2.4vw; color:#ddd; font-family:sans-serif; }
+</style>
+</head>
+<body>
+<div id="vide"><h1 id="titre">🎉</h1><p>Scannez le code QR et envoyez vos photos !</p></div>
+<img class="diapo" id="a" alt=""><img class="diapo" id="b" alt="">
+<div id="bandeau"><span id="auteur"></span><span id="compteur"></span></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>
+const C = window.CONFIG;
+document.getElementById('titre').textContent = '🎉 ' + C.TITRE;
+const client = supabase.createClient(C.SUPABASE_URL, C.SUPABASE_KEY);
+const connues = new Set(); let toutes = [], nouvelles = [], index = 0, actif = 'a', demarre = false;
+
+async function rafraichir() {
+  try {
+    let liste = [], offset = 0;
+    while (true) {
+      const { data, error } = await client.storage.from(C.BUCKET).list('', { limit: 1000, offset, sortBy: { column: 'created_at', order: 'asc' } });
+      if (error) throw error;
+      liste = liste.concat(data.filter(o => o.id)); // ignore les dossiers
+      if (data.length < 1000) break; offset += 1000;
+    }
+    for (const o of liste) if (!connues.has(o.name)) { connues.add(o.name); toutes.push(o.name); if (demarre) nouvelles.push(o.name); }
+    document.getElementById('compteur').textContent = toutes.length ? toutes.length + ' photos' : '';
+    if (!demarre && toutes.length) { demarre = true; document.getElementById('vide').style.display = 'none'; suivante(); }
+  } catch (e) { console.error(e); }
+}
+
+function auteurDe(nomFichier) {
+  const m = nomFichier.match(/^\d+_[a-z0-9]+_(.+)\.[a-z0-9]+$/i);
+  const n = m ? m[1].replace(/-/g, ' ') : '';
+  return n && n !== 'invite' ? '📸 ' + n : '';
+}
+
+function suivante() {
+  if (!toutes.length) return setTimeout(suivante, 2000);
+  // Les nouvelles photos passent en priorité, sinon on tourne en boucle
+  const nomFichier = nouvelles.length ? nouvelles.shift() : toutes[index++ % toutes.length];
+  const url = client.storage.from(C.BUCKET).getPublicUrl(nomFichier).data.publicUrl;
+  const pre = new Image();
+  pre.onload = () => {
+    const prochain = actif === 'a' ? 'b' : 'a';
+    document.getElementById(prochain).src = url;
+    document.getElementById(prochain).classList.add('visible');
+    document.getElementById(actif).classList.remove('visible');
+    actif = prochain;
+    document.getElementById('auteur').textContent = auteurDe(nomFichier);
+    setTimeout(suivante, C.SECONDES_PAR_PHOTO * 1000);
+  };
+  pre.onerror = () => setTimeout(suivante, 300); // format non affichable (ex. HEIC) : on saute
+  pre.src = url;
+}
+
+document.body.addEventListener('click', () => document.documentElement.requestFullscreen?.());
+rafraichir(); setInterval(rafraichir, 10000);
+</script>
+</body>
+</html>
