@@ -1,7 +1,7 @@
-// ⚙️ Les 2 seules valeurs à remplir (Supabase → Project Settings → API)
+// Configuration (clé publique Supabase : faite pour être visible dans une page web)
 window.CONFIG = {
-  SUPABASE_URL: "https://VOTRE-PROJET.supabase.co",
-  SUPABASE_KEY: "VOTRE_CLE_PUBLIQUE_ANON_OU_PUBLISHABLE",
+  SUPABASE_URL: "https://yvnlkobgfnamrphnhqnx.supabase.co",
+  SUPABASE_KEY: "sb_publishable_eVaKY7AXuAbzl2nSx1h7iQ_6Z_1kO_c",
   BUCKET: "photos-claudia",
   TITRE: "Les 40 ans de Claudia",
   MAX_PIXELS: 3000,      // plus grand côté après redimensionnement
